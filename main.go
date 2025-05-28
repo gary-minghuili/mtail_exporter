@@ -1,64 +1,92 @@
 package main
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
-	"time"
-	
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prom2json"
+	"golang.org/x/exp/maps"
+	syslog "log"
+	"net/http"
+	"os"
 )
 
 func main() {
+	
+	err := InitLogger("./mtail_exporter.log")
+	if err != nil {
+		syslog.Println("Failed to initialize logger")
+		os.Exit(-1)
+	}
+	GetLogger().Info("starting exporter ......")
+	http.Handle("/metrics", http.HandlerFunc(MetricsHandler))
+	err = http.ListenAndServe("0.0.0.0:3904", nil)
+	if err != nil {
+		GetLogger().Error("http.ListenAndServe error")
+		panic(err)
+	}
+}
+
+func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 	mfChan := make(chan *dto.MetricFamily, 1024)
 	transport, err := makeTransport("", "", true)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		GetLogger().Error("transport error")
 		os.Exit(1)
 	}
-	err = prom2json.FetchMetricFamilies("http://localhost:9300", mfChan, transport)
+	err = prom2json.FetchMetricFamilies("http://localhost:3903/metrics", mfChan, transport)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		GetLogger().Error("prom2json.FetchMetricFamilies error")
 		os.Exit(1)
 	}
-	result := []*prom2json.Family{}
+	var result []*prom2json.Family
 	for mf := range mfChan {
-		result = append(result, prom2json.NewFamily(mf))
+		if *mf.Type == dto.MetricType_COUNTER || *mf.Type == dto.MetricType_GAUGE {
+			result = append(result, prom2json.NewFamily(mf))
+		}
 	}
+	
 	jsonText, err := json.Marshal(result)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error marshaling JSON:", err)
+		GetLogger().Error("json marshal error")
 		os.Exit(1)
 	}
-	if _, err := os.Stdout.Write(jsonText); err != nil {
-		fmt.Fprintln(os.Stderr, "error writing to stdout:", err)
-		os.Exit(1)
+	var mtailMetrics []MtailMetric
+	if err = json.Unmarshal(jsonText, &mtailMetrics); err != nil {
+		GetLogger().Error("json unmarshal error")
 	}
-	fmt.Println()
-}
-
-func makeTransport(
-	certificate string, key string,
-	skipServerCertCheck bool,
-) (*http.Transport, error) {
-	// Start with the DefaultTransport for sane defaults.
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// Conservatively disable HTTP keep-alives as this program will only
-	// ever need a single HTTP request.
-	transport.DisableKeepAlives = true
-	// Timeout early if the server doesn't even return the headers.
-	transport.ResponseHeaderTimeout = time.Minute
-	tlsConfig := &tls.Config{InsecureSkipVerify: skipServerCertCheck}
-	if certificate != "" && key != "" {
-		cert, err := tls.LoadX509KeyPair(certificate, key)
-		if err != nil {
-			return nil, err
+	for _, mtailMetric := range mtailMetrics {
+		fmt.Println(mtailMetric.Type)
+		labels := make([]string, 0)
+		for _, metricInfo := range mtailMetric.Metrics {
+			labels = maps.Keys(metricInfo.Labels)
 		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
+		switch mtailMetric.Type {
+		case "GAUGE":
+			metric := prometheus.NewGaugeVec(
+				prometheus.GaugeOpts{Name: mtailMetric.Name, Help: mtailMetric.Help},
+				labels,
+			)
+			prometheus.MustRegister(metric)
+			for _, metricInfo := range mtailMetric.Metrics {
+				var labelsValue = metricInfo.Labels
+				metric.WithLabelValues(maps.Values(labelsValue)...)
+			}
+		case "COUNTER":
+			metric := prometheus.NewCounterVec(
+				prometheus.CounterOpts{Name: mtailMetric.Name, Help: mtailMetric.Help},
+				labels,
+			)
+			prometheus.MustRegister(metric)
+			for _, metricInfo := range mtailMetric.Metrics {
+				metric.WithLabelValues(maps.Values(metricInfo.Labels)...)
+			}
+		default:
+			fmt.Fprintln(os.Stderr, "unknown metrics type:", mtailMetric.Type)
+			GetLogger().Error(fmt.Sprintf("unknown metrics type: %s", mtailMetric.Type))
+		}
 	}
-	transport.TLSClientConfig = tlsConfig
-	return transport, nil
+	promhttp.Handler().ServeHTTP(writer, request)
 }
