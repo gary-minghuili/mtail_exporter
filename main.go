@@ -14,33 +14,47 @@ import (
 	"strings"
 )
 
+const (
+	mtailMetricsUrl = "http://localhost:3903/metrics"
+	metricsUrl      = "0.0.0.0:3904"
+	logPath         = "./mtail_exporter.log"
+)
+
 func main() {
 	
-	err := InitLogger("./mtail_exporter.log")
+	err := InitLogger(logPath)
 	if err != nil {
 		syslog.Println("Failed to initialize logger")
 		os.Exit(-1)
 	}
 	GetLogger().Info("starting exporter ......")
 	http.Handle("/metrics", http.HandlerFunc(MetricsHandler))
-	err = http.ListenAndServe("0.0.0.0:3904", nil)
+	err = http.ListenAndServe(metricsUrl, nil)
 	if err != nil {
 		GetLogger().Error("http.ListenAndServe error")
-		panic(err)
+		os.Exit(-1)
 	}
 }
 
 func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
+	if mtailMetrics, err := getMetrics(); err == nil {
+		updateMetrics(mtailMetrics)
+	}
+	promhttp.Handler().ServeHTTP(writer, request)
+}
+
+func getMetrics() ([]MtailMetric, error) {
+	var mtailMetrics []MtailMetric
 	mfChan := make(chan *dto.MetricFamily, 1024)
 	transport, err := makeTransport("", "", true)
 	if err != nil {
 		GetLogger().Error("transport error")
-		os.Exit(1)
+		return nil, err
 	}
-	err = prom2json.FetchMetricFamilies("http://localhost:3903/metrics", mfChan, transport)
+	err = prom2json.FetchMetricFamilies(mtailMetricsUrl, mfChan, transport)
 	if err != nil {
 		GetLogger().Error("prom2json.FetchMetricFamilies error")
-		os.Exit(1)
+		return nil, err
 	}
 	var result []*prom2json.Family
 	
@@ -55,17 +69,28 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 	jsonText, err := json.Marshal(result)
 	if err != nil {
 		GetLogger().Error("json marshal error")
-		os.Exit(1)
+		return nil, err
 	}
-	var mtailMetrics []MtailMetric
 	if err = json.Unmarshal(jsonText, &mtailMetrics); err != nil {
 		GetLogger().Error("json unmarshal error")
 	}
+	return mtailMetrics, nil
+}
+
+func updateMetrics(mtailMetrics []MtailMetric) {
+	msg := "duplicate metrics collector registration attempted"
 	for _, mtailMetric := range mtailMetrics {
 		labels := make([]string, 0)
 		for _, metricInfo := range mtailMetric.Metrics {
 			labels = maps.Keys(metricInfo.Labels)
+			
+			// TODO fix
 			break
+		}
+		// TODO update labels
+		indexKey := "xxx"
+		if value, ok := switchMap[indexKey]; ok {
+			labels = append(labels, value)
 		}
 		switch mtailMetric.Type {
 		case "GAUGE":
@@ -74,14 +99,14 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 				labels,
 			)
 			if err := prometheus.Register(metric); err != nil {
-				msg := "duplicate metrics collector registration attempted"
 				if !strings.Contains(err.Error(), msg) {
 					GetLogger().Error("metric collector registration error: " + err.Error())
 				}
 			}
 			for _, metricInfo := range mtailMetric.Metrics {
-				var labelsValue = metricInfo.Labels
-				metric.WithLabelValues(maps.Values(labelsValue)...)
+				// TODO update labels value
+				values := append(maps.Values(metricInfo.Labels), "xxx")
+				metric.WithLabelValues(values...).Set(metricInfo.Value)
 			}
 		case "COUNTER":
 			metric := prometheus.NewCounterVec(
@@ -89,18 +114,17 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 				labels,
 			)
 			if err := prometheus.Register(metric); err != nil {
-				msg := "duplicate metrics collector registration attempted"
 				if !strings.Contains(err.Error(), msg) {
 					GetLogger().Error("metric collector registration error: " + err.Error())
 				}
 			}
 			for _, metricInfo := range mtailMetric.Metrics {
-				metric.WithLabelValues(maps.Values(metricInfo.Labels)...)
+				// TODO update labels
+				values := append(maps.Values(metricInfo.Labels), "xxx")
+				metric.WithLabelValues(values...).Add(metricInfo.Value)
 			}
 		default:
-			fmt.Fprintln(os.Stderr, "unknown metrics type:", mtailMetric.Type)
 			GetLogger().Error(fmt.Sprintf("unknown metrics type: %s", mtailMetric.Type))
 		}
 	}
-	promhttp.Handler().ServeHTTP(writer, request)
 }

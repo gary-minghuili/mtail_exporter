@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+var (
+	switchMap = map[string]string{
+		"GAUGE": "gauge",
+	}
+)
+
 func makeTransport(
 	certificate string, key string,
 	skipServerCertCheck bool,
