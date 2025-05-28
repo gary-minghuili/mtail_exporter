@@ -73,7 +73,12 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 				prometheus.GaugeOpts{Name: mtailMetric.Name, Help: mtailMetric.Help},
 				labels,
 			)
-			prometheus.MustRegister(metric)
+			if err := prometheus.Register(metric); err != nil {
+				msg := "duplicate metrics collector registration attempted"
+				if !strings.Contains(err.Error(), msg) {
+					GetLogger().Error("metric collector registration error: " + err.Error())
+				}
+			}
 			for _, metricInfo := range mtailMetric.Metrics {
 				var labelsValue = metricInfo.Labels
 				metric.WithLabelValues(maps.Values(labelsValue)...)
@@ -83,7 +88,12 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 				prometheus.CounterOpts{Name: mtailMetric.Name, Help: mtailMetric.Help},
 				labels,
 			)
-			prometheus.MustRegister(metric)
+			if err := prometheus.Register(metric); err != nil {
+				msg := "duplicate metrics collector registration attempted"
+				if !strings.Contains(err.Error(), msg) {
+					GetLogger().Error("metric collector registration error: " + err.Error())
+				}
+			}
 			for _, metricInfo := range mtailMetric.Metrics {
 				metric.WithLabelValues(maps.Values(metricInfo.Labels)...)
 			}
