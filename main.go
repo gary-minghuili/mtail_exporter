@@ -11,6 +11,7 @@ import (
 	syslog "log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -42,9 +43,12 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 		os.Exit(1)
 	}
 	var result []*prom2json.Family
+	
 	for mf := range mfChan {
 		if *mf.Type == dto.MetricType_COUNTER || *mf.Type == dto.MetricType_GAUGE {
-			result = append(result, prom2json.NewFamily(mf))
+			if !strings.HasPrefix(*mf.Name, "go_") && !strings.HasPrefix(*mf.Name, "process_") {
+				result = append(result, prom2json.NewFamily(mf))
+			}
 		}
 	}
 	
@@ -58,10 +62,10 @@ func MetricsHandler(writer http.ResponseWriter, request *http.Request) {
 		GetLogger().Error("json unmarshal error")
 	}
 	for _, mtailMetric := range mtailMetrics {
-		fmt.Println(mtailMetric.Type)
 		labels := make([]string, 0)
 		for _, metricInfo := range mtailMetric.Metrics {
 			labels = maps.Keys(metricInfo.Labels)
+			break
 		}
 		switch mtailMetric.Type {
 		case "GAUGE":
