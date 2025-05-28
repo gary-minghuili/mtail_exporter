@@ -3,15 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	syslog "log"
+	"net/http"
+	"os"
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prom2json"
 	"golang.org/x/exp/maps"
-	syslog "log"
-	"net/http"
-	"os"
-	"strings"
 )
 
 const (
@@ -21,7 +22,7 @@ const (
 )
 
 func main() {
-	
+
 	err := InitLogger(logPath)
 	if err != nil {
 		syslog.Println("Failed to initialize logger")
@@ -57,7 +58,7 @@ func getMetrics() ([]MtailMetric, error) {
 		return nil, err
 	}
 	var result []*prom2json.Family
-	
+
 	for mf := range mfChan {
 		if *mf.Type == dto.MetricType_COUNTER || *mf.Type == dto.MetricType_GAUGE {
 			if !strings.HasPrefix(*mf.Name, "go_") && !strings.HasPrefix(*mf.Name, "process_") {
@@ -65,7 +66,7 @@ func getMetrics() ([]MtailMetric, error) {
 			}
 		}
 	}
-	
+
 	jsonText, err := json.Marshal(result)
 	if err != nil {
 		GetLogger().Error("json marshal error")
@@ -83,15 +84,13 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 		labels := make([]string, 0)
 		for _, metricInfo := range mtailMetric.Metrics {
 			labels = maps.Keys(metricInfo.Labels)
-			
-			// TODO fix
 			break
 		}
-		// TODO update labels
-		indexKey := "xxx"
-		if value, ok := switchMap[indexKey]; ok {
-			labels = append(labels, value)
-		}
+		// // TODO update labels
+		// indexKey := "xxx"
+		// if value, ok := switchMap[indexKey]; ok {
+		// 	labels = append(labels, value)
+		// }
 		switch mtailMetric.Type {
 		case "GAUGE":
 			metric := prometheus.NewGaugeVec(
@@ -105,7 +104,12 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 			}
 			for _, metricInfo := range mtailMetric.Metrics {
 				// TODO update labels value
-				values := append(maps.Values(metricInfo.Labels), "xxx")
+				// values := append(maps.Values(metricInfo.Labels), "xxx")
+				values := make([]string, 0)
+				for _, label := range labels {
+					value := metricInfo.Labels[label]
+					values = append(values, value)
+				}
 				metric.WithLabelValues(values...).Set(metricInfo.Value)
 			}
 		case "COUNTER":
@@ -120,7 +124,12 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 			}
 			for _, metricInfo := range mtailMetric.Metrics {
 				// TODO update labels
-				values := append(maps.Values(metricInfo.Labels), "xxx")
+				// values := append(maps.Values(metricInfo.Labels), "xxx")
+				values := make([]string, 0)
+				for _, label := range labels {
+					value := metricInfo.Labels[label]
+					values = append(values, value)
+				}
 				metric.WithLabelValues(values...).Add(metricInfo.Value)
 			}
 		default:
