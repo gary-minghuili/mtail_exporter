@@ -6,6 +6,6 @@ type MtailMetric struct {
 	Type    string `json:"type"`
 	Metrics []struct {
 		Labels map[string]string `json:"labels"`
-		Value  float64           `json:"value"`
+		Value  string            `json:"value"`
 	} `json:"metrics"`
 }

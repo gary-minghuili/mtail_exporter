@@ -6,8 +6,9 @@ import (
 	syslog "log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
-
+	
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	dto "github.com/prometheus/client_model/go"
@@ -22,7 +23,7 @@ const (
 )
 
 func main() {
-
+	
 	err := InitLogger(logPath)
 	if err != nil {
 		syslog.Println("Failed to initialize logger")
@@ -58,7 +59,7 @@ func getMetrics() ([]MtailMetric, error) {
 		return nil, err
 	}
 	var result []*prom2json.Family
-
+	
 	for mf := range mfChan {
 		if *mf.Type == dto.MetricType_COUNTER || *mf.Type == dto.MetricType_GAUGE {
 			if !strings.HasPrefix(*mf.Name, "go_") && !strings.HasPrefix(*mf.Name, "process_") {
@@ -66,7 +67,7 @@ func getMetrics() ([]MtailMetric, error) {
 			}
 		}
 	}
-
+	
 	jsonText, err := json.Marshal(result)
 	if err != nil {
 		GetLogger().Error("json marshal error")
@@ -86,6 +87,7 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 			labels = maps.Keys(metricInfo.Labels)
 			break
 		}
+		sort.Strings(labels)
 		// // TODO update labels
 		// indexKey := "xxx"
 		// if value, ok := switchMap[indexKey]; ok {
@@ -110,7 +112,7 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 					value := metricInfo.Labels[label]
 					values = append(values, value)
 				}
-				metric.WithLabelValues(values...).Set(metricInfo.Value)
+				metric.WithLabelValues(values...).Set(toFloat64(metricInfo.Value))
 			}
 		case "COUNTER":
 			metric := prometheus.NewCounterVec(
@@ -122,6 +124,7 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 					GetLogger().Error("metric collector registration error: " + err.Error())
 				}
 			}
+			metric.Reset()
 			for _, metricInfo := range mtailMetric.Metrics {
 				// TODO update labels
 				// values := append(maps.Values(metricInfo.Labels), "xxx")
@@ -130,7 +133,7 @@ func updateMetrics(mtailMetrics []MtailMetric) {
 					value := metricInfo.Labels[label]
 					values = append(values, value)
 				}
-				metric.WithLabelValues(values...).Add(metricInfo.Value)
+				metric.WithLabelValues(values...).Add(toFloat64(metricInfo.Value))
 			}
 		default:
 			GetLogger().Error(fmt.Sprintf("unknown metrics type: %s", mtailMetric.Type))

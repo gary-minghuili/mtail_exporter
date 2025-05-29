@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -29,4 +30,11 @@ func makeTransport(
 	}
 	transport.TLSClientConfig = tlsConfig
 	return transport, nil
+}
+
+func toFloat64(s string) float64 {
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return 0
 }
